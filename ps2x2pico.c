@@ -23,15 +23,18 @@
  *
  */
 
+#include <stdarg.h>
 #include "hardware/gpio.h"
 #include "bsp/board.h"
 #include "tusb.h"
 
-#define KBCLK 11
+#define ENABLE_KB
+#define ENABLE_MS
+
+#define KBCLK 13
 #define KBDAT 12
-#define LVPWR 13
-#define MSCLK 14
-#define MSDAT 15
+#define MSCLK 15
+#define MSDAT 14
 
 uint8_t const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
 uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
@@ -82,6 +85,15 @@ uint8_t ms_mode = MS_MODE_IDLE;
 uint8_t ms_input_mode = MS_INPUT_CMD;
 uint8_t ms_rate = 100;
 uint32_t ms_magic_seq = 0x00;
+
+void ps_log(const char *fmt, ...) {
+#ifndef DEBUG_MSG
+  va_list arg;
+  va_start(arg, fmt);
+  vprintf(fmt, arg);
+  va_end(arg);
+#endif
+}
 
 int64_t repeat_callback(alarm_id_t id, void *user_data) {
   if(repeat) {
@@ -152,12 +164,12 @@ void ps2_send(uint8_t data, bool channel) {
 }
 
 void ms_send(uint8_t data) {
-  printf("send MS %02x\n", data);
+  ps_log("send MS %02x\n", data);
   ps2_send(data, false);
 }
 
 void kbd_send(uint8_t data) {
-  printf("send KB %02x\n", data);
+  ps_log("send KB %02x\n", data);
   ps2_send(data, true);
 }
 
@@ -278,7 +290,7 @@ void process_ms(uint8_t data) {
     } else if (ms_type == MS_TYPE_WHEEL_3 && ms_magic_seq == 0xc8c850) {
       ms_type = MS_TYPE_WHEEL_5;
     }
-    printf("  MS magic seq: %06x type: %d\n", ms_magic_seq, ms_type);
+    ps_log("  MS magic seq: %06x type: %d\n", ms_magic_seq, ms_type);
     return;
   }
 
@@ -389,20 +401,21 @@ void ps2_receive(bool channel) {
   }
 
   if(channel) {
-    printf("got KB %02x  ", (unsigned char)data);
+    ps_log("got KB %02x  ", (unsigned char)data);
     process_kbd(data);
   } else {
-    printf("got MS %02x  ", (unsigned char)data);
+    ps_log("got MS %02x  ", (unsigned char)data);
     process_ms(data);
   }
 }
 
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
-  printf("HID device address = %d, instance = %d is mounted\n", dev_addr, instance);
+  ps_log("HID device address = %d, instance = %d is mounted\n", dev_addr, instance);
 
   switch(tuh_hid_interface_protocol(dev_addr, instance)) {
+#ifdef ENABLE_KB
     case HID_ITF_PROTOCOL_KEYBOARD:
-      printf("HID Interface Protocol = Keyboard\n");
+      ps_log("HID Interface Protocol = Keyboard\n");
       
       kbd_addr = dev_addr;
       kbd_inst = instance;
@@ -412,22 +425,26 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
       
       tuh_hid_receive_report(dev_addr, instance);
     break;
+#endif
     
+#ifdef ENABLE_MS
     case HID_ITF_PROTOCOL_MOUSE:
-      printf("HID Interface Protocol = Mouse\n");
+      ps_log("HID Interface Protocol = Mouse\n");
       //tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_REPORT);
       tuh_hid_receive_report(dev_addr, instance);
     break;
+#endif
   }
 }
 
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
-  printf("HID device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
+  ps_log("HID device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
 }
 
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
   
   switch(tuh_hid_interface_protocol(dev_addr, instance)) {
+#ifdef ENABLE_KB
     case HID_ITF_PROTOCOL_KEYBOARD:
       
       if(!kbd_enabled || report[1] != 0) {
@@ -521,9 +538,11 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
       tuh_hid_receive_report(dev_addr, instance);
       board_led_write(0);
     break;
-    
+#endif
+
+#ifdef ENABLE_MS
     case HID_ITF_PROTOCOL_MOUSE:
-      printf("%02x %02x %02x %02x\n", report[0], report[1], report[2], report[3]);
+      ps_log("%02x %02x %02x %02x\n", report[0], report[1], report[2], report[3]);
       
       if(ms_mode != MS_MODE_STREAMING) {
         tuh_hid_receive_report(dev_addr, instance);
@@ -576,40 +595,61 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
       tuh_hid_receive_report(dev_addr, instance);
       board_led_write(0);
     break;
+#endif
   }
   
 }
 
 void irq_callback(uint gpio, uint32_t events) {
   if(irq_enabled) {
+#ifdef ENABLE_KB
     if(gpio == KBCLK && !gpio_get(KBDAT)) {
-      printf("IRQ KB  ");
+      ps_log("IRQ KB  ");
       receive_kbd = true;
     }
-    
+#endif
+
+#ifdef ENABLE_MS
     if(gpio == MSCLK && !gpio_get(MSDAT)) {
-      printf("IRQ MS  ");
+      ps_log("IRQ MS  ");
       receive_ms = true;
     }
+#endif
   }
+}
+
+void led_on()
+{
+  const uint LED_PIN = PICO_DEFAULT_LED_PIN;
+  gpio_init(LED_PIN);
+  gpio_set_dir(LED_PIN, GPIO_OUT);
+  gpio_put(LED_PIN, 1);
 }
 
 void main() {
   board_init();
-  printf("ps2x2pico-0.5\n");
+  ps_log("ps2x2pico-0.5\n");
   
+#ifdef ENABLE_KB
   gpio_init(KBCLK);
   gpio_init(KBDAT);
+  gpio_set_pulls(KBCLK, 1, 0);
+  gpio_set_pulls(KBDAT, 1, 0);
+  gpio_set_irq_enabled_with_callback(KBCLK, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
+#endif
+
+#ifdef ENABLE_MS
   gpio_init(MSCLK);
   gpio_init(MSDAT);
-  gpio_init(LVPWR);
-  gpio_set_dir(LVPWR, GPIO_OUT);
-  gpio_put(LVPWR, 1);
-  
-  gpio_set_irq_enabled_with_callback(KBCLK, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
+  gpio_set_pulls(MSCLK, 1, 0);
+  gpio_set_pulls(MSDAT, 1, 0);
   gpio_set_irq_enabled_with_callback(MSCLK, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
+#endif
+  
   tusb_init();
   
+  led_on();
+
   while(true) {
     tuh_task();
     
@@ -622,14 +662,18 @@ void main() {
       }
     }
     
+#ifdef ENABLE_KB
     if(receive_kbd) {
       receive_kbd = false;
       ps2_receive(true);
     }
+#endif
     
+#ifdef ENABLE_MS
     if(receive_ms) {
       receive_ms = false;
       ps2_receive(false);
     }
+#endif
   }
 }
