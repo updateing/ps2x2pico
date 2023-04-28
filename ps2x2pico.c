@@ -90,12 +90,14 @@ uint8_t ms_rate = 100;
 uint32_t ms_magic_seq = 0x00;
 
 void ps_log(const char *fmt, ...) {
-#ifndef DEBUG_MSG
+  char buf[128];
   va_list arg;
   va_start(arg, fmt);
-  vprintf(fmt, arg);
+  vsnprintf(buf, sizeof(buf), fmt, arg);
   va_end(arg);
-#endif
+
+  buf[sizeof(buf) - 1] = 0;
+  printf(buf);
 }
 
 int64_t repeat_callback(alarm_id_t id, void *user_data) {
@@ -449,6 +451,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
   switch(tuh_hid_interface_protocol(dev_addr, instance)) {
 #ifdef ENABLE_KB
     case HID_ITF_PROTOCOL_KEYBOARD:
+      ps_log("HID KBD: %02x %02x %02x %02x %02x %02x %02x %02x\n", report[0], report[1], report[2], report[3], report[4], report[5], report[6], report[7]);
       
       if(!kbd_enabled || report[1] != 0) {
         tuh_hid_receive_report(dev_addr, instance);
@@ -561,7 +564,7 @@ end_curr:
 
 #ifdef ENABLE_MS
     case HID_ITF_PROTOCOL_MOUSE:
-      ps_log("%02x %02x %02x %02x\n", report[0], report[1], report[2], report[3]);
+      ps_log("HID  MS: %02x %02x %02x %02x\n", report[0], report[1], report[2], report[3]);
       
       if(ms_mode != MS_MODE_STREAMING) {
         tuh_hid_receive_report(dev_addr, instance);
@@ -570,10 +573,10 @@ end_curr:
       
       board_led_write(1);
       
-      uint8_t s = (report[0] & 7) + 8;
-      uint8_t x = report[1] & 0x7f;
-      uint8_t y = report[2] & 0x7f;
-      uint8_t z = report[3] & 7;
+      uint8_t s = (report[0] & 7) + 8;    // Button status, bit 0/1/2 = L/R/M
+      uint8_t x = report[1] & 0x7f; // < 0: left, > 0: right
+      uint8_t y = report[2] & 0x7f; // < 0: up,   > 0: down
+      uint8_t z = report[3] & 7;    // vendor
       
       if(report[1] >> 7) {
         s += 0x10;
@@ -623,14 +626,12 @@ void irq_callback(uint gpio, uint32_t events) {
   if(irq_enabled) {
 #ifdef ENABLE_KB
     if(gpio == KBCLK && !gpio_get(KBDAT)) {
-      ps_log("IRQ KB  ");
       receive_kbd = true;
     }
 #endif
 
 #ifdef ENABLE_MS
     if(gpio == MSCLK && !gpio_get(MSDAT)) {
-      ps_log("IRQ MS  ");
       receive_ms = true;
     }
 #endif
