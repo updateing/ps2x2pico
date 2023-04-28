@@ -46,7 +46,10 @@ uint8_t const hid2ps2[] = {
   0x83, 0x0a, 0x01, 0x09, 0x78, 0x07, 0x7c, 0x7e, 0x7e, 0x70, 0x6c, 0x7d, 0x71, 0x69, 0x7a, 0x74,
   0x6b, 0x72, 0x75, 0x77, 0x4a, 0x7c, 0x7b, 0x79, 0x5a, 0x69, 0x72, 0x7a, 0x6b, 0x73, 0x74, 0x6c,
   0x75, 0x7d, 0x70, 0x71, 0x61, 0x2f, 0x37, 0x0f, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40,
-  0x48, 0x50, 0x57, 0x5f
+  0x48, 0x50, 0x57, 0x5f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+  /* make room for hidps2[0x96] to support hidden LANG keys on Logitech keyboards */
 };
 uint8_t const maparray = sizeof(hid2ps2) / sizeof(uint8_t);
 
@@ -492,6 +495,12 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
           
           if(brk && report[i] < maparray) {
             if(prev_rpt[i] == 0x48) continue;
+            if(prev_rpt[i] >= 0x90 && prev_rpt[i] <= 0x96) {
+              // released KEY_HANJA/HANGUEL -> released print screen
+              kbd_send(0xe0); kbd_send(0xf0); kbd_send(0x7c);
+              kbd_send(0xe0); kbd_send(0xf0); kbd_send(0x12);
+              goto end_prev;
+            }
             if(prev_rpt[i] == repeat) repeat = 0;
             
             maybe_send_e0(prev_rpt[i]);
@@ -499,7 +508,8 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
             kbd_send(hid2ps2[prev_rpt[i]]);
           }
         }
-        
+
+end_prev:
         if(report[i]) {
           bool make = true;
           
@@ -522,6 +532,14 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
               
               continue;
             }
+
+            if (report[i] >= 0x90 && report[i] <= 0x96) {
+              // pressed KEY_HANJA/HANGUEL -> pressed print screen
+              kbd_send(0xe0); kbd_send(0x12);
+              kbd_send(0xe0); kbd_send(0x7c);
+              prev_rpt[i] = report[i];
+              goto end_curr;
+            }
             
             repeat = report[i];
             if(repeater) cancel_alarm(repeater);
@@ -531,7 +549,8 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
             kbd_send(hid2ps2[report[i]]);
           }
         }
-        
+
+end_curr:
         prev_rpt[i] = report[i];
       }
       
