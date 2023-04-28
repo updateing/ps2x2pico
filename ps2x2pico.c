@@ -669,6 +669,15 @@ void main() {
   
   led_on();
 
+#ifdef ENABLE_KB
+  kbd_send(0xaa);
+#endif
+
+#ifdef ENABLE_MS
+  ms_send(0xaa);
+  ms_send(0x00);
+#endif
+
   while(true) {
     tuh_task();
     
